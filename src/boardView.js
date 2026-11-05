@@ -35,6 +35,12 @@ export const DRAWING_TOOLS = new Set([
  */
 const MAX_PREVIEW_CHARS = 900_000;
 
+/**
+ * Pixel densities tried in turn: a large board rendered at full size went past the limit and the
+ * view showed no image at all (seen 2026-11-06), so a smaller render is better than none.
+ */
+const PREVIEW_SCALES = [1, 0.6, 0.35, 0.2];
+
 const html = readFileSync(new URL("./board-view.html", import.meta.url), "utf8");
 
 export function boardViewEnabled(env = process.env) {
@@ -107,8 +113,14 @@ export function displayBoard(getProvider, renderPng) {
       if (!active.length) {
         board.empty = true;
       } else {
-        const png = await renderPng(active, { scale: 1, padding: 24 });
-        if (png.length <= MAX_PREVIEW_CHARS) board.png = png;
+        for (const scale of PREVIEW_SCALES) {
+          const png = await renderPng(active, { scale, padding: 24 });
+          if (png.length <= MAX_PREVIEW_CHARS) {
+            board.png = png;
+            break;
+          }
+        }
+        if (!board.png) board.tooLarge = true;
       }
     } catch (err) {
       board.error = err.message;

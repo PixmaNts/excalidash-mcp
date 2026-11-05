@@ -81,9 +81,21 @@ test("empty boards, failed renders and oversized previews never fail display_boa
   assert.equal(broken.structuredContent.excalidashBoard.error, "no browser");
   assert.equal(broken.isError, undefined);
 
-  const huge = await displayBoard(
+  const scales = [];
+  const shrunk = await displayBoard(
     () => fakeProvider({ name: "Big", elements: [{ id: "a" }] }),
+    async (_elements, { scale }) => {
+      scales.push(scale);
+      return scale < 0.5 ? "data:image/png;base64,small" : "data:image/png;base64," + "A".repeat(1_000_000);
+    },
+  )({ board_id: "b" });
+  assert.deepEqual(scales, [1, 0.6, 0.35]);
+  assert.equal(shrunk.structuredContent.excalidashBoard.png, "data:image/png;base64,small");
+
+  const huge = await displayBoard(
+    () => fakeProvider({ name: "Huge", elements: [{ id: "a" }] }),
     async () => "data:image/png;base64," + "A".repeat(1_000_000),
   )({ board_id: "b" });
   assert.equal(huge.structuredContent.excalidashBoard.png, undefined);
+  assert.equal(huge.structuredContent.excalidashBoard.tooLarge, true);
 });

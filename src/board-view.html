@@ -61,7 +61,9 @@
       img.onclick = openBoard;
       viewEl.replaceChildren(img);
     } else {
-      note(board.empty ? "The board is empty." : "No preview available. Open the board to see it.");
+      note(board.empty ? "The board is empty."
+        : board.tooLarge ? "The board is too large to preview here. Open it to see it."
+        : "No preview available. Open the board to see it.");
     }
     reportSize();
   }
