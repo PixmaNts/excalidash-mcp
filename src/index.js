@@ -28,11 +28,14 @@ import { checkIds } from "./validate.js";
 import { browserLaunchOptions } from "./browser.js";
 import { ProviderCache, contextualProvider, startHttpServer } from "./http.js";
 import {
-  BOARD_VIEW_TOOLS,
+  DISPLAY_TOOL,
+  DRAWING_TOOLS,
   boardViewEnabled,
   boardViewResource,
   boardViewToolMeta,
-  withBoardPreview,
+  displayBoard,
+  displayBoardDescription,
+  withDisplayHint,
 } from "./boardView.js";
 import packageMetadata from "../package.json" with { type: "json" };
 
@@ -265,17 +268,14 @@ const server = new McpServer(serverInfo);
 
 // An McpServer drives one transport at a time, and stateless HTTP needs one per request. Record
 // every tool and resource as it is registered below, so HTTP mode can build a fresh server with
-// the same ones. Tools that show a board also get the board view here, when it is enabled.
+// the same ones. With the board view enabled, drawing tools also get the display_board hint here.
 const BOARD_VIEW = boardViewEnabled();
 const toolRegistrations = [];
 const resourceRegistrations = [];
 const registerTool = server.registerTool.bind(server);
 const registerResource = server.registerResource.bind(server);
 server.registerTool = (name, config, handler) => {
-  if (BOARD_VIEW && BOARD_VIEW_TOOLS.has(name)) {
-    config = { ...config, _meta: boardViewToolMeta(config._meta) };
-    handler = withBoardPreview(handler, () => provider, renderPng);
-  }
+  if (BOARD_VIEW && DRAWING_TOOLS.has(name)) handler = withDisplayHint(handler, () => provider);
   toolRegistrations.push([name, config, handler]);
   return registerTool(name, config, handler);
 };
@@ -292,6 +292,12 @@ function buildServer() {
 if (BOARD_VIEW) {
   const view = boardViewResource(process.env.EXCALIDASH_URL || "http://localhost:6767");
   server.registerResource(view.name, view.uri, view.metadata, view.read);
+  server.registerTool(DISPLAY_TOOL, {
+    description: displayBoardDescription,
+    inputSchema: z.object({ board_id: z.string() }),
+    annotations: { readOnlyHint: true },
+    _meta: boardViewToolMeta(),
+  }, displayBoard(() => provider, renderPng));
 }
 
 // ============================================================
@@ -416,7 +422,11 @@ server.registerTool("read_me", {
   description: "Get the element format cheat sheet. Call this ONCE at the start before drawing.",
   annotations: { readOnlyHint: true },
 }, async () => {
-  return { content: [{ type: "text", text: CHEAT_SHEET }] };
+  const showing = BOARD_VIEW
+    ? "\n## Showing the result\nWhen a drawing is finished, call display_board once to show it " +
+      "in the chat, then give the user the board's edit link.\n"
+    : "";
+  return { content: [{ type: "text", text: CHEAT_SHEET + showing }] };
 });
 
 // ============================================================

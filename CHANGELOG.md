@@ -6,8 +6,9 @@
   request carries the caller's ExcaliDash API key in `X-ExcaliDash-Api-Key` or a bearer, and runs
   with a provider bound to that key, so one server serves many users with their own rights.
 - Add a Dockerfile for that mode, based on the Playwright image.
-- Add an optional board view (`EXCALIDASH_MCP_BOARD_VIEW=1`): an MCP App that shows a preview of
-  the board after `read_board` and the drawing tools, with a button that opens it in ExcaliDash.
+- Add an optional board view (`EXCALIDASH_MCP_BOARD_VIEW=1`): a `display_board` tool whose result
+  is an MCP App showing a preview of the board with a button that opens it in ExcaliDash; drawing
+  tools then remind the agent to call it once the drawing is done and to give the edit link.
 
 ## 1.1.1 - 2026-08-20
 

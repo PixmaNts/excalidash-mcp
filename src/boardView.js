@@ -2,9 +2,11 @@
  * Board view: an MCP App that shows the board a tool just worked on, inside the chat.
  *
  * Without it, a drawing tool answers with a link and the user leaves the conversation to see the
- * result. With EXCALIDASH_MCP_BOARD_VIEW=1, the tools that take a board_id also render that board
- * to a PNG after they run and declare a small HTML view (MCP Apps, `ui://` resource) that shows the
- * image with an "Open in ExcaliDash" button. Hosts without MCP Apps ignore the extra metadata.
+ * result. With EXCALIDASH_MCP_BOARD_VIEW=1, the server gains a `display_board` tool bound to a
+ * small HTML view (MCP Apps, `ui://` resource) that shows the board as an image with an "Open in
+ * ExcaliDash" button. Only that tool carries the view: hosts offer the view on every call of a tool
+ * that declares one, and a view under list_boards or each small edit is noise. The drawing tools
+ * instead end their result with a hint to call display_board once the drawing is done.
  *
  * The image travels in `structuredContent`, which hosts hand to the view, not in `content`, which
  * goes to the model: a preview must not cost the model a few hundred kilobytes of tokens per call.
@@ -14,9 +16,10 @@ import { readFileSync } from "node:fs";
 export const BOARD_VIEW_URI = "ui://excalidash/board-view.html";
 export const MCP_APP_MIME_TYPE = "text/html;profile=mcp-app";
 
-/** Tools whose result is a board worth showing; all of them take `board_id`. */
-export const BOARD_VIEW_TOOLS = new Set([
-  "read_board",
+export const DISPLAY_TOOL = "display_board";
+
+/** Tools that change a board; with the view enabled, their result points at display_board. */
+export const DRAWING_TOOLS = new Set([
   "draw_scene",
   "draw_graph",
   "draw_mermaid",
@@ -65,18 +68,36 @@ export function boardViewResource(publicUrl) {
 }
 
 /**
- * Wrap a tool handler so its result also carries the board preview. A preview that cannot be
- * produced never fails the tool: the view then shows the link alone.
- *
- * @param handler the tool's own handler
- * @param getProvider returns the provider of the current call (resolved per request in HTTP mode)
- * @param renderPng (elements, opts) => data URL
+ * Wrap a drawing tool so a successful result ends with what to do next: show the board with
+ * display_board once the drawing is finished, and give the user the edit link.
  */
-export function withBoardPreview(handler, getProvider, renderPng) {
+export function withDisplayHint(handler, getProvider) {
   return async (args, extra) => {
     const result = await handler(args, extra);
     const boardId = args?.board_id;
-    if (!boardId || result?.isError) return result;
+    if (!boardId || result?.isError || !Array.isArray(result?.content)) return result;
+    const url = getProvider().getUrl(boardId);
+    const hint =
+      `When the drawing is finished (not after every step), call ${DISPLAY_TOOL} with this ` +
+      `board_id to show it to the user in the chat, and give them the edit link: ${url}`;
+    return { ...result, content: [...result.content, { type: "text", text: hint }] };
+  };
+}
+
+export const displayBoardDescription =
+  "Show a board to the user inside the chat, as a preview with an Open in ExcaliDash button. " +
+  "Call it once, when a drawing is finished or when the user asks to see a board, then give the " +
+  "user the edit link. Do not call it after each intermediate edit.";
+
+/**
+ * The display_board handler: render the board to a PNG for the view. A preview that cannot be
+ * produced never fails the tool: the view then shows the link alone.
+ *
+ * @param getProvider returns the provider of the current call (resolved per request in HTTP mode)
+ * @param renderPng (elements, opts) => data URL
+ */
+export function displayBoard(getProvider, renderPng) {
+  return async ({ board_id: boardId }) => {
     const provider = getProvider();
     const board = { id: boardId, url: provider.getUrl(boardId) };
     try {
@@ -92,9 +113,13 @@ export function withBoardPreview(handler, getProvider, renderPng) {
     } catch (err) {
       board.error = err.message;
     }
+    const shown = board.name ? `"${board.name}"` : "The board";
     return {
-      ...result,
-      structuredContent: { ...(result.structuredContent || {}), excalidashBoard: board },
+      content: [{
+        type: "text",
+        text: `${shown} is shown to the user in the chat. Give them the edit link: ${board.url}`,
+      }],
+      structuredContent: { excalidashBoard: board },
     };
   };
 }
