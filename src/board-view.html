@@ -1,0 +1,111 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root { color-scheme: light dark; }
+  body { margin: 0; font: 14px system-ui, sans-serif; background: transparent; }
+  .card { border: 1px solid #d0d0d7; border-radius: 10px; overflow: hidden; background: #fff; color: #1b1b1f; }
+  .bar { display: flex; align-items: center; gap: 12px; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid #ececf1; }
+  .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  button { flex: none; border: 0; border-radius: 6px; padding: 6px 12px; font: inherit; font-size: 13px; color: #fff; background: #6965db; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  .view img { display: block; max-width: 100%; max-height: 640px; margin: 0 auto; padding: 12px; box-sizing: border-box; cursor: zoom-in; }
+  .note { padding: 20px; text-align: center; color: #6b6b76; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="bar">
+    <span class="name" id="name">ExcaliDash</span>
+    <button id="open" disabled>Open in ExcaliDash</button>
+  </div>
+  <div class="view" id="view"><div class="note">Loading the board…</div></div>
+</div>
+<script>
+  // MCP Apps bridge, by hand: JSON-RPC over postMessage with the host (spec 2025-11-21).
+  // No SDK, so the view loads without fetching anything from a CDN.
+  let nextId = 1;
+  const pending = new Map();
+  const send = (message) => window.parent.postMessage({ jsonrpc: "2.0", ...message }, "*");
+  const request = (method, params) => new Promise((resolve, reject) => {
+    const id = nextId++;
+    pending.set(id, { resolve, reject });
+    send({ id, method, params });
+  });
+  const notify = (method, params) => send(params === undefined ? { method } : { method, params });
+
+  let boardUrl = null;
+  const nameEl = document.getElementById("name");
+  const viewEl = document.getElementById("view");
+  const openEl = document.getElementById("open");
+
+  function note(text) {
+    viewEl.replaceChildren(Object.assign(document.createElement("div"), { className: "note", textContent: text }));
+  }
+
+  function show(result) {
+    const board = result && result.structuredContent && result.structuredContent.excalidashBoard;
+    if (!board) {
+      note(result && result.isError ? "The tool call failed." : "No board to show.");
+      return;
+    }
+    nameEl.textContent = board.name || "ExcaliDash";
+    boardUrl = board.url || null;
+    openEl.disabled = !boardUrl;
+    if (board.png) {
+      const img = new Image();
+      img.alt = board.name || "Board preview";
+      img.src = board.png;
+      img.onload = reportSize;
+      img.onclick = openBoard;
+      viewEl.replaceChildren(img);
+    } else {
+      note(board.empty ? "The board is empty." : "No preview available. Open the board to see it.");
+    }
+    reportSize();
+  }
+
+  function openBoard() {
+    if (boardUrl) request("ui/open-link", { url: boardUrl }).catch(() => {});
+  }
+  openEl.addEventListener("click", openBoard);
+
+  // The preferred width is "as wide as the host allows": hosts cap a frame to their column, and
+  // some (LibreChat) size the frame to the reported width, which would otherwise be the 300 px
+  // a frame starts at.
+  let lastHeight = 0;
+  function reportSize() {
+    const height = Math.ceil(document.documentElement.getBoundingClientRect().height);
+    if (height === lastHeight) return;
+    lastHeight = height;
+    notify("ui/notifications/size-changed", { width: 4000, height });
+  }
+  new ResizeObserver(reportSize).observe(document.body);
+
+  window.addEventListener("message", (event) => {
+    if (event.source !== window.parent) return;
+    const message = event.data;
+    if (!message || message.jsonrpc !== "2.0") return;
+    if (message.method === undefined && message.id !== undefined) {
+      const waiter = pending.get(message.id);
+      if (!waiter) return;
+      pending.delete(message.id);
+      if (message.error) waiter.reject(message.error);
+      else waiter.resolve(message.result);
+      return;
+    }
+    if (message.method === "ui/notifications/tool-result") show(message.params);
+    else if (message.id !== undefined) send({ id: message.id, result: {} });
+  });
+
+  request("ui/initialize", {
+    appCapabilities: {},
+    appInfo: { name: "excalidash-board-view", version: "1.0.0" },
+    protocolVersion: "2025-11-21",
+  })
+    .then(() => { notify("ui/notifications/initialized"); reportSize(); })
+    .catch(() => note("This host could not start the board view."));
+</script>
+</body>
+</html>

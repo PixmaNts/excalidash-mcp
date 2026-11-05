@@ -165,6 +165,12 @@ Outside the image, set `EXCALIDASH_MCP_TRANSPORT=http`, and optionally `EXCALIDA
 The endpoint has no other access control: anyone who can reach it and holds a valid key can use
 that key. Keep it on a private network, behind the front end that calls it.
 
+Set `EXCALIDASH_MCP_BOARD_VIEW=1` to show the board inside the chat in hosts that support
+[MCP Apps](https://modelcontextprotocol.io/docs/extensions/apps): after `read_board` and every
+drawing or editing tool, the host displays a preview of the board with an **Open in ExcaliDash**
+button. The preview reaches the view through `structuredContent` and is never sent to the model.
+It works in stdio mode too.
+
 LibreChat example, where each user enters their own key under **Configure**:
 
 ```yaml

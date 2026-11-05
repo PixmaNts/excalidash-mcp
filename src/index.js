@@ -27,6 +27,13 @@ import { edgePoint, centre } from "./geometry.js";
 import { checkIds } from "./validate.js";
 import { browserLaunchOptions } from "./browser.js";
 import { ProviderCache, contextualProvider, startHttpServer } from "./http.js";
+import {
+  BOARD_VIEW_TOOLS,
+  boardViewEnabled,
+  boardViewResource,
+  boardViewToolMeta,
+  withBoardPreview,
+} from "./boardView.js";
 import packageMetadata from "../package.json" with { type: "json" };
 
 // stdio serves one person with credentials from the environment. HTTP serves many: each
@@ -257,17 +264,34 @@ const serverInfo = { name: "excalidash-mcp", version: packageMetadata.version };
 const server = new McpServer(serverInfo);
 
 // An McpServer drives one transport at a time, and stateless HTTP needs one per request. Record
-// every tool as it is registered below, so HTTP mode can build a fresh server with the same tools.
+// every tool and resource as it is registered below, so HTTP mode can build a fresh server with
+// the same ones. Tools that show a board also get the board view here, when it is enabled.
+const BOARD_VIEW = boardViewEnabled();
 const toolRegistrations = [];
+const resourceRegistrations = [];
 const registerTool = server.registerTool.bind(server);
-server.registerTool = (...args) => {
-  toolRegistrations.push(args);
-  return registerTool(...args);
+const registerResource = server.registerResource.bind(server);
+server.registerTool = (name, config, handler) => {
+  if (BOARD_VIEW && BOARD_VIEW_TOOLS.has(name)) {
+    config = { ...config, _meta: boardViewToolMeta(config._meta) };
+    handler = withBoardPreview(handler, () => provider, renderPng);
+  }
+  toolRegistrations.push([name, config, handler]);
+  return registerTool(name, config, handler);
+};
+server.registerResource = (...args) => {
+  resourceRegistrations.push(args);
+  return registerResource(...args);
 };
 function buildServer() {
   const fresh = new McpServer(serverInfo);
   for (const args of toolRegistrations) fresh.registerTool(...args);
+  for (const args of resourceRegistrations) fresh.registerResource(...args);
   return fresh;
+}
+if (BOARD_VIEW) {
+  const view = boardViewResource(process.env.EXCALIDASH_URL || "http://localhost:6767");
+  server.registerResource(view.name, view.uri, view.metadata, view.read);
 }
 
 // ============================================================
