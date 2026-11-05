@@ -26,9 +26,14 @@ import { expandDeletion, severReferences, retargetReferences, reflowDependants }
 import { edgePoint, centre } from "./geometry.js";
 import { checkIds } from "./validate.js";
 import { browserLaunchOptions } from "./browser.js";
+import { ProviderCache, contextualProvider, startHttpServer } from "./http.js";
 import packageMetadata from "../package.json" with { type: "json" };
 
-const provider = new ExcaliDashProvider();
+// stdio serves one person with credentials from the environment. HTTP serves many: each
+// request carries its own API key, and `provider` resolves to that key's provider (see http.js).
+const HTTP_MODE = process.env.EXCALIDASH_MCP_TRANSPORT === "http";
+const providers = HTTP_MODE ? new ProviderCache((apiKey) => new ExcaliDashProvider({ apiKey })) : null;
+const provider = HTTP_MODE ? contextualProvider() : new ExcaliDashProvider();
 
 /** commit(), with this server's provider already bound in. */
 const commit = (boardId, mutate, opts) => commitToBoard(provider, boardId, mutate, opts);
@@ -248,7 +253,22 @@ async function pushElements(boardId, newElements, mode = "append", opts = {}) {
 // ============================================================
 // MCP Server
 // ============================================================
-const server = new McpServer({ name: "excalidash-mcp", version: packageMetadata.version });
+const serverInfo = { name: "excalidash-mcp", version: packageMetadata.version };
+const server = new McpServer(serverInfo);
+
+// An McpServer drives one transport at a time, and stateless HTTP needs one per request. Record
+// every tool as it is registered below, so HTTP mode can build a fresh server with the same tools.
+const toolRegistrations = [];
+const registerTool = server.registerTool.bind(server);
+server.registerTool = (...args) => {
+  toolRegistrations.push(args);
+  return registerTool(...args);
+};
+function buildServer() {
+  const fresh = new McpServer(serverInfo);
+  for (const args of toolRegistrations) fresh.registerTool(...args);
+  return fresh;
+}
 
 // ============================================================
 // read_me — Element format cheat sheet
@@ -1044,7 +1064,7 @@ async function shutdown(code = 0) {
   await Promise.allSettled([
     _browser?.close(),
     closeConverter(),
-    provider.disconnect(),
+    HTTP_MODE ? providers.closeAll() : provider.disconnect(),
   ]);
   process.exit(code);
 }
@@ -1052,9 +1072,21 @@ async function shutdown(code = 0) {
 for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
   process.on(signal, () => shutdown(0));
 }
-// The client going away closes stdin — that is the normal end of an MCP session.
-process.stdin.on("close", () => shutdown(0));
-process.stdin.on("end", () => shutdown(0));
+// The client going away closes stdin — that is the normal end of an MCP session. Not in HTTP
+// mode, where stdin is unused and may be closed from the start (a container, a service).
+if (!HTTP_MODE) {
+  process.stdin.on("close", () => shutdown(0));
+  process.stdin.on("end", () => shutdown(0));
+}
 
-async function main() { await server.connect(new StdioServerTransport()); }
+async function main() {
+  if (!HTTP_MODE) {
+    await server.connect(new StdioServerTransport());
+    return;
+  }
+  await startHttpServer(buildServer, providers, {
+    host: process.env.EXCALIDASH_MCP_HOST || "127.0.0.1",
+    port: Number(process.env.EXCALIDASH_MCP_PORT) || 3000,
+  });
+}
 main().catch((e) => { console.error(e); process.exit(1); });

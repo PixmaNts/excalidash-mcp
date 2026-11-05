@@ -52,7 +52,9 @@ async function run() {
   }
   if (command) throw new Error(`Unknown command: ${command}`);
 
-  const credentials = credentialError();
+  // In HTTP mode every request brings its own API key; the process needs none.
+  const credentials =
+    process.env.EXCALIDASH_MCP_TRANSPORT === "http" ? null : credentialError();
   if (credentials) throw new Error(credentials);
   await assertBrowserInstalled();
   browserLaunchOptions();

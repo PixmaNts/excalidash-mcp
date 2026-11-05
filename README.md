@@ -136,6 +136,50 @@ Add this to `~/.cursor/mcp.json`, then reload Cursor:
 > it to the backend already, so no custom Nginx config and no exposed ports are needed.
 > See [the setup guide](https://github.com/davifernan/excalidash-mcp/blob/main/docs/setup.md) for the details and the same-host alternative.
 
+### Shared server over HTTP
+
+For a chat front end with many users (LibreChat, Open WebUI), run one server over Streamable
+HTTP instead of one process per person. The server holds no credentials: every request carries
+the caller's own ExcaliDash API key, so each tool call acts with exactly that user's rights and
+lands on that user's boards.
+
+```bash
+docker build -t excalidash-mcp .
+curl -fsSLO https://raw.githubusercontent.com/microsoft/playwright/v1.59.1/utils/docker/seccomp_profile.json
+docker run -d -p 3000:3000 \
+  --security-opt seccomp=seccomp_profile.json \
+  -e EXCALIDASH_BACKEND_URL=https://draw.example.com/api \
+  -e EXCALIDASH_URL=https://draw.example.com \
+  excalidash-mcp
+```
+
+Chromium's sandbox needs user namespaces, which Docker's default seccomp profile blocks: without
+the Playwright profile above, Mermaid conversion and PNG export fail with "Chromium sandboxing
+failed". Prefer that profile over `EXCALIDASH_DISABLE_BROWSER_SANDBOX=1`.
+
+Clients send the key in the `X-ExcaliDash-Api-Key` header (or as `Authorization: Bearer`) to
+`POST /mcp`; a request without a key is refused with 401. `GET /health` answers without one.
+Outside the image, set `EXCALIDASH_MCP_TRANSPORT=http`, and optionally `EXCALIDASH_MCP_HOST`
+(default `127.0.0.1`) and `EXCALIDASH_MCP_PORT` (default `3000`).
+
+The endpoint has no other access control: anyone who can reach it and holds a valid key can use
+that key. Keep it on a private network, behind the front end that calls it.
+
+LibreChat example, where each user enters their own key under **Configure**:
+
+```yaml
+mcpServers:
+  excalidash:
+    type: streamable-http
+    url: http://127.0.0.1:3000/mcp
+    headers:
+      X-ExcaliDash-Api-Key: '{{EXCALIDASH_API_KEY}}'
+    customUserVars:
+      EXCALIDASH_API_KEY:
+        title: ExcaliDash API key
+        description: Create one under Profile, API keys in ExcaliDash.
+```
+
 ## Drawing
 
 Ask for a structured diagram in plain language and the agent writes Mermaid. For example:

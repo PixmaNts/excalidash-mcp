@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Add a Streamable HTTP transport for shared deployments (`EXCALIDASH_MCP_TRANSPORT=http`): every
+  request carries the caller's ExcaliDash API key in `X-ExcaliDash-Api-Key` or a bearer, and runs
+  with a provider bound to that key, so one server serves many users with their own rights.
+- Add a Dockerfile for that mode, based on the Playwright image.
+
 ## 1.1.1 - 2026-08-20
 
 - Ship the ExcaliDash diagramming skill in the npm package.
